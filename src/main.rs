@@ -94,24 +94,35 @@ fn main() {
             println!("[{}] [{:?}] [{}] {}", time_str, event.thread_id, event.level, message);
         }
     });
-
-    // --- Ticker Thread ---
+// --- Ticker Thread ---
     let ticker_stats = Arc::clone(&stats);
-    let ticker_interval = cli.ticker_ms;
+    let ticker_interval_ms = cli.ticker_ms;
     let mode_clone = cli.mode.clone();
+    
     thread::spawn(move || {
         let mut last_count = 0;
         loop {
-            thread::sleep(Duration::from_millis(ticker_interval));
+            // 1. Calculate sleep duration to the next boundary
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            let now_ms = now.as_millis() as u64;
+            let sleep_ms = ticker_interval_ms - (now_ms % ticker_interval_ms);
+            
+            thread::sleep(Duration::from_millis(sleep_ms));
+
+            // 2. Get high-precision timestamp for the log
+            let datetime = chrono::Local::now();
+            let time_str = datetime.format("%H:%M:%S%.6f").to_string();
+
+            // 3. Process Stats
             let total = ticker_stats.count_total.load(Ordering::Relaxed);
             let highest = ticker_stats.highest_seq.load(Ordering::Relaxed);
             let delta = total - last_count;
-            let rate = delta as f64 / (ticker_interval as f64 / 1000.0);
+            let rate = delta as f64 / (ticker_interval_ms as f64 / 1000.0);
 
             match mode_clone {
                 Mode::Echo { .. } => {
-                    println!("ECHO Tick: Latest Seq: {} | Packets Recv: {} | Rate: {:.2}/s", 
-                        highest, total, rate);
+                    println!("[{}] ECHO Tick: Latest Seq: {} | Packets Recv: {} | Rate: {:.2}/s", 
+                        time_str, highest, total, rate);
                 },
                 Mode::Send { .. } => {
                     let timeouts = ticker_stats.timeouts_total.load(Ordering::Relaxed);
@@ -125,8 +136,8 @@ fn main() {
                         ("na".into(), "na".into(), "na".into())
                     };
 
-                    println!("SEND Tick: Seq: {} | echos: {} ({:.2}/s) | Timeouts: {} | Min/Max/Avg: {}/{}/{}",
-                        highest, total, rate, timeouts, min_s, max_s, avg_s);
+                    println!("[{}] SEND Tick: Seq: {} | echos: {} ({:.2}/s) | Timeouts: {} | Min/Max/Avg: {}/{}/{}",
+                        time_str, highest, total, rate, timeouts, min_s, max_s, avg_s);
                 }
             }
             last_count = total;
