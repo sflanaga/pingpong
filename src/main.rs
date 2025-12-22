@@ -86,9 +86,9 @@ fn main() {
                 LogData::Error(s) => format!("ERROR: {}", s),
                 LogData::Timeout { seq } => format!("Timeout for sequence {}", seq),
                 LogData::DataMismatch { seq, .. } => format!("DATA MISMATCH on sequence {}", seq),
+                // Inside the logging thread match statement:
                 LogData::Response { seq, delay_ns } => {
-                    let secs = delay_ns as f64 / 1_000_000_000.0;
-                    format!("Seq {} Delay: {:.9}", seq, secs)
+                    format!("Seq {} Delay: {}", seq, format_duration(delay_ns))
                 }
             };
             println!("[{}] [{:?}] [{}] {}", time_str, event.thread_id, event.level, message);
@@ -130,8 +130,13 @@ fn main() {
                     let max = ticker_stats.max_delay_ns.swap(0, Ordering::SeqCst);
                     let sum = ticker_stats.sum_delay_ns.swap(0, Ordering::SeqCst);
 
+                    // Inside the ticker thread, Mode::Send branch:
                     let (min_s, max_s, avg_s) = if delta > 0 {
-                        (format!("{:.9}s", min as f64 / 1e9), format!("{:.9}s", max as f64 / 1e9), format!("{:.9}s", (sum / delta) as f64 / 1e9))
+                        (
+                            format_duration(min),
+                            format_duration(max),
+                            format_duration(sum / delta)
+                        )
                     } else {
                         ("na".into(), "na".into(), "na".into())
                     };
@@ -152,6 +157,27 @@ fn main() {
 
 fn now_ns() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64
+}
+
+fn format_duration(nanos: u64) -> String {
+    let ns = nanos as f64;
+    let (value, unit) = if ns >= 1_000_000_000.0 {
+        (ns / 1_000_000_000.0, "s")
+    } else if ns >= 1_000_000.0 {
+        (ns / 1_000_000.0, "ms")
+    } else if ns >= 1_000.0 {
+        (ns / 1_000.0, "us")
+    } else {
+        return format!("{}ns", nanos); // ns is always an integer in this context
+    };
+
+    if value >= 100.0 {
+        format!("{:.0}{}", value, unit)   // e.g., 523ms
+    } else if value >= 10.0 {
+        format!("{:.1}{}", value, unit)   // e.g., 52.3ms
+    } else {
+        format!("{:.2}{}", value, unit)   // e.g., 1.23ms
+    }
 }
 
 fn send_log(tx: &Sender<LogEvent>, level: &'static str, data: LogData) {
