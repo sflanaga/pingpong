@@ -1,25 +1,24 @@
 use clap::{Parser, Subcommand};
 use crossbeam_channel::{unbounded, Sender};
-use std::net::{UdpSocket, SocketAddr};
+use std::net::UdpSocket;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Logic for the high-precision logging system
 struct LogEvent {
-    timestamp_ns: u64,
+    _timestamp_ns: u64,
     thread_id: thread::ThreadId,
     level: &'static str,
     data: LogData,
 }
 
 enum LogData {
-    Info(String),
     Response { seq: u64, delay_ns: u64 },
     Timeout { seq: u64 },
     Error(String),
-    DataMismatch { seq: u64, expected: Vec<u8>, actual: Vec<u8> },
+    DataMismatch { seq: u64, _expected: Vec<u8>, _actual: Vec<u8> },
 }
 
 struct Stats {
@@ -82,11 +81,9 @@ fn main() {
             let time_str = datetime.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
             
             let message = match event.data {
-                LogData::Info(s) => s,
                 LogData::Error(s) => format!("ERROR: {}", s),
                 LogData::Timeout { seq } => format!("Timeout for sequence {}", seq),
                 LogData::DataMismatch { seq, .. } => format!("DATA MISMATCH on sequence {}", seq),
-                // Inside the logging thread match statement:
                 LogData::Response { seq, delay_ns } => {
                     format!("Seq {} Delay: {}", seq, format_duration(delay_ns))
                 }
@@ -94,7 +91,8 @@ fn main() {
             println!("[{}] [{:?}] [{}] {}", time_str, event.thread_id, event.level, message);
         }
     });
-// --- Ticker Thread ---
+
+    // --- Ticker Thread ---
     let ticker_stats = Arc::clone(&stats);
     let ticker_interval_ms = cli.ticker_ms;
     let mode_clone = cli.mode.clone();
@@ -102,18 +100,15 @@ fn main() {
     thread::spawn(move || {
         let mut last_count = 0;
         loop {
-            // 1. Calculate sleep duration to the next boundary
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
             let now_ms = now.as_millis() as u64;
             let sleep_ms = ticker_interval_ms - (now_ms % ticker_interval_ms);
             
             thread::sleep(Duration::from_millis(sleep_ms));
 
-            // 2. Get high-precision timestamp for the log
             let datetime = chrono::Local::now();
             let time_str = datetime.format("%H:%M:%S%.6f").to_string();
 
-            // 3. Process Stats
             let total = ticker_stats.count_total.load(Ordering::Relaxed);
             let highest = ticker_stats.highest_seq.load(Ordering::Relaxed);
             let delta = total - last_count;
@@ -130,7 +125,6 @@ fn main() {
                     let max = ticker_stats.max_delay_ns.swap(0, Ordering::SeqCst);
                     let sum = ticker_stats.sum_delay_ns.swap(0, Ordering::SeqCst);
 
-                    // Inside the ticker thread, Mode::Send branch:
                     let (min_s, max_s, avg_s) = if delta > 0 {
                         (
                             format_duration(min),
@@ -168,23 +162,23 @@ fn format_duration(nanos: u64) -> String {
     } else if ns >= 1_000.0 {
         (ns / 1_000.0, "us")
     } else {
-        return format!("{}ns", nanos); // ns is always an integer in this context
+        return format!("{}ns", nanos);
     };
 
     if value >= 100.0 {
-        format!("{:.0}{}", value, unit)   // e.g., 523ms
+        format!("{:.0}{}", value, unit)
     } else if value >= 10.0 {
-        format!("{:.1}{}", value, unit)   // e.g., 52.3ms
+        format!("{:.1}{}", value, unit)
     } else {
-        format!("{:.2}{}", value, unit)   // e.g., 1.23ms
+        format!("{:.2}{}", value, unit)
     }
 }
 
 fn send_log(tx: &Sender<LogEvent>, level: &'static str, data: LogData) {
-    let _ = tx.send(LogEvent { timestamp_ns: now_ns(), thread_id: thread::current().id(), level, data });
+    let _ = tx.send(LogEvent { _timestamp_ns: now_ns(), thread_id: thread::current().id(), level, data });
 }
 
-fn run_echo(port: u16, log_tx: Sender<LogEvent>, stats: Arc<Stats>) {
+fn run_echo(port: u16, _log_tx: Sender<LogEvent>, stats: Arc<Stats>) {
     let socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).expect("Failed to bind");
     let mut buf = [0u8; 1024];
     loop {
@@ -220,12 +214,11 @@ fn run_send(target: String, timeout_ms: u64, delay_ms: u64, log_tx: Sender<LogEv
                     let end_ns = now_ns();
                     let received_payload = &buf[..amt];
                     
-                    // Cross-check: Verify payload matches what we sent
                     if received_payload != packet {
                         send_log(&log_tx, "ERROR", LogData::DataMismatch { 
                             seq, 
-                            expected: packet.to_vec(), 
-                            actual: received_payload.to_vec() 
+                            _expected: packet.to_vec(), 
+                            _actual: received_payload.to_vec() 
                         });
                     } else {
                         let delay = end_ns - start_ns;
