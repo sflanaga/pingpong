@@ -59,7 +59,7 @@ struct Cli {
 enum Mode {
     Send {
         target: String,
-        #[arg(long, default_value_t = 6000)]
+        #[arg(long, default_value_t = 500)]
         timeout: u64,
         #[arg(long, default_value_t = 0)]
         delay: u64,
